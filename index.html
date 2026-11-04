@@ -387,6 +387,68 @@
     sakura.position.copy(moon.position).addScaledVector(_r, -26 * k).addScaledVector(_u, -20 * k).addScaledVector(_f, -8);
   }
 
+  // ---------------- 연못: 물에 비친 달빛 띠 + 띄운 종이 등불
+  const REF = 26;
+  const refl = new THREE.InstancedMesh(waterGeo, new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }), REF);
+  refl.frustumCulled = false; scene.add(refl);
+  const floats = [];
+  const floatBody = new THREE.BoxGeometry(0.9, 0.8, 0.9), floatBase = new THREE.BoxGeometry(1.3, 0.25, 1.3), floatBaseMat = new THREE.MeshLambertMaterial({ color: 0x3a2a30 });
+  const FLOAT_COLS = [0xffb35c, 0xff9cc4, 0xffd27a];
+  for (let i = 0; i < 7; i++) {
+    const c = FLOAT_COLS[i % 3], g = new THREE.Group();
+    const body = new THREE.Mesh(floatBody, new THREE.MeshBasicMaterial({ color: c })); body.position.y = 0.5;
+    const base = new THREE.Mesh(floatBase, floatBaseMat);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: c, fog: false, depthWrite: false, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending }));
+    halo.scale.setScalar(7); halo.position.y = 0.6;
+    g.add(base, body, halo); scene.add(g);
+    floats.push({ g, halo, a: i / 7 * Math.PI * 2 + R(-0.3, 0.3), k: R(0.35, 0.8), w: R(0.025, 0.05) * (rnd() < 0.5 ? -1 : 1), s: rnd() * 6 });
+  }
+  const _pd = new THREE.Vector3(), _pm = new THREE.Matrix4(), _ps = new THREE.Vector3();
+  function pondFx(t, dt) {
+    // 반사 띠는 카메라에서 연못 쪽으로 뻗는다: 화면에서는 세로로 선 달빛 길이 된다
+    _pd.set(POND.x - camera.position.x, 0, POND.z - camera.position.z).normalize();
+    const yawR = Math.atan2(_pd.x, _pd.z);
+    let n = 0;
+    for (let i = 0; i < REF; i++) {
+      const u = (i / (REF - 1)) * 2 - 1, along = u * POND.rx * 0.95, side = Math.sin(t * 1.7 + i * 2.3) * 0.6;
+      const x = POND.x + _pd.x * along - _pd.z * side, z = POND.z + _pd.z * along + _pd.x * side;
+      if (!inPond(x, z)) continue;
+      const wd = (1.6 - Math.abs(u)) * (0.6 + 0.4 * Math.sin(t * 3.1 + i * 1.3)) * 1.4;
+      _pm.makeRotationY(yawR); _pm.scale(_ps.set(wd, 1, 0.55)); _pm.setPosition(x, 0.6, z);
+      refl.setMatrixAt(n++, _pm);
+    }
+    refl.count = n; refl.instanceMatrix.needsUpdate = true;
+    floats.forEach(f => {
+      f.a += f.w * dt;
+      f.g.position.set(POND.x + Math.cos(f.a) * POND.rx * f.k, 0.55 + Math.sin(t * 1.4 + f.s) * 0.12, POND.z + Math.sin(f.a) * POND.rz * f.k);
+      f.g.rotation.y = f.a * 0.5 + f.s;
+      f.halo.material.opacity = 0.5 + Math.sin(t * 2.3 + f.s) * 0.12;
+    });
+  }
+
+  // ---------------- 벚나무 사이 초롱 줄
+  {
+    const pairs = [[0, 2], [0, 6], [0, 4], [4, 5], [5, 8], [8, 3], [3, 1], [1, 7]];
+    const ropePts = [], lamps = [];
+    for (const [a, b] of pairs) {
+      const [x0, z0] = trees[a], [x1, z1] = trees[b];
+      const L = Math.hypot(x1 - x0, z1 - z0), n = Math.max(6, Math.round(L / 2.6));
+      let prev = null;
+      for (let i = 0; i <= n; i++) {
+        const u = i / n, y = 7.5 - Math.sin(Math.PI * u) * 3;          // 줄이 가운데로 처진다
+        const p = new THREE.Vector3(x0 + (x1 - x0) * u, y, z0 + (z1 - z0) * u);
+        if (prev) ropePts.push(prev, p); prev = p;
+        if (i > 0 && i < n) lamps.push([p.x, y - 0.7, p.z]);
+      }
+    }
+    scene.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(ropePts), new THREE.LineBasicMaterial({ color: 0x2a1c22 })));
+    const LC = [0xffb35c, 0xff8fbf, 0xffd27a, 0xffc4dd];
+    const lm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.75, 0.95, 0.75), new THREE.MeshBasicMaterial(), lamps.length);
+    const m4 = new THREE.Matrix4(), c3 = new THREE.Color();
+    lamps.forEach(([x, y, z], i) => { m4.makeTranslation(x, y, z); lm.setMatrixAt(i, m4); lm.setColorAt(i, c3.setHex(LC[i % LC.length])); });
+    scene.add(lm);
+  }
+
   const dummy = new THREE.Object3D();
   // ---------------- 불꽃놀이: 정원 둘레에서 쏘아 올려 밤하늘에서 터진다
   const FW_MAX = 3600;
@@ -400,21 +462,37 @@
   const fp = [], shells = [];
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
   function emit(p, v, life, c, size, drag = 1.3, grav = 9) { if (fp.length < FW_MAX) fp.push({ p: p.clone(), v, life: 0, max: life, c, size, drag, grav }); }
-  function launch(kind) {
-    // 카메라가 보는 쪽 하늘(정원 너머)에서 쏜다
+  function launch(kind, fast) {
+    // 카메라가 보는 쪽 하늘(정원 너머)에서 쏜다. fast: 촛불 끈 순간용, MV 가 뜨기 전에 터지도록 빨리 오른다
     const a = Math.atan2(-camera.position.z, -camera.position.x) + R(-0.75, 0.75), r = R(115, 165);
-    shells.push({ p: V(Math.cos(a) * r, 0, Math.sin(a) * r), v: V(R(-3, 3), R(42, 54), R(-3, 3)), fuse: R(1.15, 1.45), t: 0, kind, col: FW_COLS[(rnd() * FW_COLS.length) | 0] });
+    shells.push({ p: V(Math.cos(a) * r, 0, Math.sin(a) * r), v: V(R(-3, 3), fast ? 70 : R(42, 54), R(-3, 3)), fuse: fast ? 0.8 : R(1.15, 1.45), t: 0, kind, col: FW_COLS[(rnd() * FW_COLS.length) | 0] });
   }
-  function pickKind() { const u = rnd(); return u < 0.42 ? "sphere" : u < 0.62 ? "ring" : u < 0.8 ? "willow" : "heart"; }
+  // 오시마크 🌸🌙 모양 불꽃: 초승달(원에서 비낀 원을 뺀 테두리)과 다섯 잎 벚꽃 테두리
+  const CRESCENT = [], SAKURA = [];
+  for (let i = 0; i < 200; i++) {
+    const a = i / 200 * Math.PI * 2, x = Math.cos(a), y = Math.sin(a);
+    if ((x - 0.42) ** 2 + (y - 0.18) ** 2 > 0.92 ** 2) CRESCENT.push([x + 0.3, y]);
+    const ix = 0.42 + Math.cos(a) * 0.92, iy = 0.18 + Math.sin(a) * 0.92;
+    if (ix * ix + iy * iy < 1) CRESCENT.push([ix + 0.3, iy]);
+  }
+  for (let i = 0; i < 150; i++) {
+    const a = i / 150 * Math.PI * 2, petal = Math.cos((a - Math.PI / 2) * 5) * 0.5 + 0.5;
+    let r = 0.35 + 0.65 * Math.pow(petal, 0.6); if (petal > 0.97) r *= 0.86;
+    SAKURA.push([Math.cos(a) * r, Math.sin(a) * r]);
+  }
+  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; SAKURA.push([Math.cos(a) * 0.12, Math.sin(a) * 0.12]); }
+  function pickKind() { const u = rnd(); return u < 0.32 ? "sphere" : u < 0.47 ? "ring" : u < 0.62 ? "willow" : u < 0.74 ? "heart" : u < 0.87 ? "crescent" : "sakura"; }
   function burst(s) {
-    const [c0, c1] = s.kind === "willow" ? [0xffc35a, 0xfff0b8] : s.col;
-    const n = s.kind === "ring" ? 96 : s.kind === "heart" ? 120 : s.kind === "willow" ? 150 : 170;
+    const shape = s.kind === "crescent" ? CRESCENT : s.kind === "sakura" ? SAKURA : null;
+    const [c0, c1] = s.kind === "willow" ? [0xffc35a, 0xfff0b8] : s.kind === "crescent" ? [0xfff2b0, 0xffffff] : s.kind === "sakura" ? [0xff9cc4, 0xffd9ea] : s.col;
+    const n = shape ? shape.length : s.kind === "ring" ? 96 : s.kind === "heart" ? 120 : s.kind === "willow" ? 150 : 170;
     // 고리·하트는 카메라를 향한 평면에 그린다
     const fwd = V(0, 0, 0).subVectors(camera.position, s.p).normalize(), right = V(0, 1, 0).cross(fwd).normalize(), up = V(0, 0, 0).crossVectors(fwd, right);
     const tilt = R(-0.5, 0.5);
     for (let i = 0; i < n; i++) {
       let d, sp = R(26, 34);
       if (s.kind === "ring") { const a = i / n * Math.PI * 2; d = V(0, 0, 0).addScaledVector(right, Math.cos(a)).addScaledVector(up, Math.sin(a) * Math.cos(tilt)).addScaledVector(fwd, Math.sin(a) * Math.sin(tilt)); sp = 30; }
+      else if (shape) { const q = shape[i]; d = V(0, 0, 0).addScaledVector(right, q[0]).addScaledVector(up, q[1]); sp = 30; }
       else if (s.kind === "heart") { const a = i / n * Math.PI * 2, hx = 16 * Math.sin(a) ** 3 / 17, hy = (13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a)) / 17; d = V(0, 0, 0).addScaledVector(right, hx).addScaledVector(up, hy); sp = 30; }
       else { const u = rnd() * 2 - 1, th = rnd() * Math.PI * 2, q = Math.sqrt(1 - u * u); d = V(q * Math.cos(th), u, q * Math.sin(th)); }
       const willow = s.kind === "willow";
@@ -558,6 +636,7 @@
     if (!lit_) return; lit_ = false; blowT = 0; hint.style.opacity = 0; confetti.visible = true;
     cd.forEach(d => { d.p.set(R(-2, 2), 24 + CY, R(-2, 2)); const a = rnd() * Math.PI * 2, s = R(10, 26); d.v.set(Math.cos(a) * s * 0.6, R(14, 32), Math.sin(a) * s * 0.6); d.life = 0; });
     smoke.forEach((s, i) => { s.position.copy(flames[i % 5].position); s.userData.t = -(i / 5 | 0) * 0.18; });
+    launch("crescent", true); setTimeout(() => launch("sakura", true), 220);   // 촛불을 끄면 🌸🌙 가 터진다
     setTimeout(openMV, reduce ? 200 : 1600);
   }
   function relight() { lit_ = true; blowT = -1; hint.style.opacity = 1; flames.forEach(f => f.visible = true); candleLight.intensity = 1.6; }
@@ -650,6 +729,7 @@
     bgPetals.instanceMatrix.needsUpdate = true;
     water.material.emissiveIntensity = 0.9 + Math.sin(t * 0.8) * 0.1;
     fireworks(dt);
+    pondFx(t, dt);
     meteors(dt);
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
