@@ -2,5 +2,5 @@
 
 초승달과 불꽃놀이 밤하늘 아래 벚꽃이 흩날리는 복셀 정원 페이지입니다. 케이크를 누르면 뮤직비디오가 나와요.
 
-- 페이지: index.html (three.js r128, hls.js 1.5.13 CDN)
-- mv/: 뮤직비디오 HLS 조각 (재생목록 index.txt, fMP4)
+- 페이지: index.html (three.js r128)
+- mv.mp4: 뮤직비디오 (720p, faststart)

@@ -87,7 +87,6 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.13/hls.min.js"></script>
 <script>
 (() => {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -487,10 +486,8 @@
   const mv = document.getElementById("mv"), video = document.getElementById("video"), err = document.getElementById("err");
   function attach() {
     if (video.dataset.ready) return; video.dataset.ready = "1";
-    const src = "mv/index.txt"; video.disableRemotePlayback = true;   // 아티팩트가 .m3u8 을 안 내줘서 .txt + fMP4
-    if (window.Hls && Hls.isSupported()) { const hls = new Hls({ maxBufferLength: 30 }); hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) { err.textContent = "영상을 불러오지 못했어요. 새로고침해 주세요."; err.hidden = false; } }); hls.loadSource(src); hls.attachMedia(video); }
-    else if (video.canPlayType("application/vnd.apple.mpegurl")) video.src = src;
-    else { err.textContent = "이 브라우저에서는 영상을 재생할 수 없어요."; err.hidden = false; }
+    video.addEventListener("error", () => { err.textContent = "영상을 불러오지 못했어요. 새로고침해 주세요."; err.hidden = false; });
+    video.src = "mv.mp4";
   }
   function openMV() { attach(); mv.hidden = false; requestAnimationFrame(() => mv.classList.add("show")); const p = video.play(); if (p && p.catch) p.catch(() => {}); document.getElementById("close").focus({ preventScroll: true }); }
   function closeMV() { video.pause(); mv.classList.remove("show"); setTimeout(() => { mv.hidden = true; }, 600); relight(); canvas.focus({ preventScroll: true }); }
