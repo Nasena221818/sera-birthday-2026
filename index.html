@@ -1,4 +1,15 @@
-<title>세라 생일 케이크</title>
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  /* 아티팩트 플랫폼이 씌워 주던 기본 뼈대를 직접 넣는다. 특히 [hidden] 규칙이 없으면 숨긴 MV 창이 투명하게 화면 전체를 덮어 터치를 막는다 */
+  [hidden] { display: none !important; }
+  *, *::before, *::after { box-sizing: border-box; }
+  :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; }
+</style><title>세라 생일 케이크</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -65,6 +76,8 @@
   .err { color: var(--rose); font-size: 14px; }
 </style>
 
+</head>
+<body>
 <canvas id="stage" tabindex="0" aria-label="밤 벚꽃 정원의 세라 생일 복셀 케이크. 누르거나 엔터를 치면 뮤직비디오가 나와요."></canvas>
 <header class="head">
   <div class="eyebrow">HAPPY BIRTHDAY</div>
@@ -555,3 +568,6 @@
   tick();
 })();
 </script>
+
+</body>
+</html>
