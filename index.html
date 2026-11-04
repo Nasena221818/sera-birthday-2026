@@ -351,10 +351,12 @@
     const D = 320, wide = camera.aspect >= 0.9;
     _f.subVectors(target, camera.position).normalize(); _r.crossVectors(_f, UP).normalize(); _u.crossVectors(_r, _f);
     const vh = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), hh = vh * camera.aspect;
-    const sx = wide ? 0.46 : 0.42, sy = wide ? 0.5 : 0.36;
+    const sx = wide ? 0.46 : 0.36, sy = wide ? 0.5 : 0.52;
+    moon.scale.setScalar(wide ? 64 : 34); moonGlow.scale.setScalar(wide ? 230 : 130); sakura.scale.setScalar(wide ? 30 : 17);   // 세로 화면에선 케이크를 가리지 않게 작게
     moon.position.copy(camera.position).addScaledVector(_f, D).addScaledVector(_r, D * hh * sx).addScaledVector(_u, D * vh * sy);
     moonGlow.position.copy(moon.position);
-    sakura.position.copy(moon.position).addScaledVector(_r, -26).addScaledVector(_u, -20).addScaledVector(_f, -8);
+    const k = wide ? 1 : 0.55;
+    sakura.position.copy(moon.position).addScaledVector(_r, -26 * k).addScaledVector(_u, -20 * k).addScaledVector(_f, -8);
   }
 
   const dummy = new THREE.Object3D();
@@ -460,15 +462,22 @@
   placeCamera(); placeMoon();   // 첫 구도 기준으로 한 번만
 
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
-  function hitsCake(e) { const r = canvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); return ray.intersectObjects([cake, ...candles, ...flames.flatMap(f => f.children)]).length > 0; }
+  // 탭 판정: 케이크를 감싸는 보이지 않는 원기둥(폰에서는 케이크가 작아서 복셀만으로는 잘 안 맞는다)
+  const hitbox = new THREE.Mesh(new THREE.CylinderGeometry(16, 16, 32, 16), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, colorWrite: false }));
+  hitbox.position.set(0, CY + 14, 0); scene.add(hitbox);
+  function hitsCake(e) { const r = canvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); return ray.intersectObjects([hitbox, cake, ...candles, ...flames.flatMap(f => f.children)]).length > 0; }
   let down = null;
-  canvas.addEventListener("pointerdown", e => { down = { x: e.clientX, y: e.clientY, yaw, pitch, moved: 0 }; canvas.setPointerCapture(e.pointerId); });
+  const TAP = touch ? 14 : 6;   // 손가락은 탭할 때도 조금 움직인다
+  canvas.addEventListener("pointerdown", e => { down = { x: e.clientX, y: e.clientY, yaw, pitch, moved: 0 }; try { canvas.setPointerCapture(e.pointerId); } catch (_) {} });
+  canvas.addEventListener("pointercancel", () => { down = null; });
+  let lastDrag = false;
+  canvas.addEventListener("click", e => { if (!lastDrag && hitsCake(e)) blowOut(); });   // 일부 모바일 브라우저는 pointerup 대신 click 만 믿을 만하다
   canvas.addEventListener("pointermove", e => {
     if (down) { const dx = e.clientX - down.x, dy = e.clientY - down.y; down.moved = Math.max(down.moved, Math.hypot(dx, dy));
-      if (down.moved > 6) { auto = false; yaw = down.yaw - dx * 0.005; pitch = Math.min(0.9, Math.max(0.04, down.pitch + dy * 0.003)); } }
+      if (down.moved > TAP) { auto = false; yaw = down.yaw - dx * 0.005; pitch = Math.min(0.9, Math.max(0.04, down.pitch + dy * 0.003)); } }
     else if (e.pointerType === "mouse") canvas.classList.toggle("hot", hitsCake(e));
   });
-  canvas.addEventListener("pointerup", e => { if (down && down.moved <= 6 && hitsCake(e)) blowOut(); down = null; });
+  canvas.addEventListener("pointerup", e => { lastDrag = !!down && down.moved > TAP; if (down && !lastDrag && hitsCake(e)) blowOut(); down = null; });
   canvas.addEventListener("wheel", e => { e.preventDefault(); dist = Math.min(190, Math.max(50, dist * (1 + e.deltaY * 0.001))); }, { passive: false });
   canvas.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); blowOut(); } });
   document.getElementById("direct").addEventListener("click", () => openMV());
@@ -489,6 +498,7 @@
     video.addEventListener("error", () => { err.textContent = "영상을 불러오지 못했어요. 새로고침해 주세요."; err.hidden = false; });
     video.src = "mv.mp4";
   }
+
   function openMV() { attach(); mv.hidden = false; requestAnimationFrame(() => mv.classList.add("show")); const p = video.play(); if (p && p.catch) p.catch(() => {}); document.getElementById("close").focus({ preventScroll: true }); }
   function closeMV() { video.pause(); mv.classList.remove("show"); setTimeout(() => { mv.hidden = true; }, 600); relight(); canvas.focus({ preventScroll: true }); }
   document.getElementById("close").addEventListener("click", closeMV);
