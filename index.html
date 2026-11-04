@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>
-  /* 아티팩트 플랫폼이 씌워 주던 기본 뼈대를 직접 넣는다. 특히 [hidden] 규칙이 없으면 숨긴 MV 창이 투명하게 화면 전체를 덮어 터치를 막는다 */
+  /* 아티팩트 플랫폼이 씌워 주던 기본 뼈대. [hidden] 규칙이 없으면 숨긴 MV 창이 투명하게 화면을 덮어 터치를 막는다 */
   [hidden] { display: none !important; }
   *, *::before, *::after { box-sizing: border-box; }
   :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -38,6 +38,10 @@
   }
   #stage { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
   #stage.hot { cursor: pointer; }
+  /* 별똥별은 하늘 위쪽에만 그리는 2D 층. 3D 캔버스 위, 글자 아래 */
+  #meteors { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  .head, .foot { z-index: 2; }
+  .mv { z-index: 5; }
   #stage:focus-visible { outline: 3px solid var(--rose); outline-offset: -6px; }
   .head {
     position: fixed; left: 0; right: 0; top: 0;
@@ -78,6 +82,7 @@
 
 </head>
 <body>
+<canvas id="meteors" aria-hidden="true"></canvas>
 <canvas id="stage" tabindex="0" aria-label="밤 벚꽃 정원의 세라 생일 복셀 케이크. 누르거나 엔터를 치면 뮤직비디오가 나와요."></canvas>
 <header class="head">
   <div class="eyebrow">HAPPY BIRTHDAY</div>
@@ -434,6 +439,29 @@
     flash.intensity *= Math.exp(-5 * dt);
     halos.forEach(h => { h.material.opacity *= Math.exp(-3.2 * dt); });
   }
+  // ---------------- 먼 산 실루엣: 두 겹 산등성이 + 그 사이의 어두운 들판
+  {
+    // 달(거리 320)보다 뒤에 두어야 달을 가리지 않는다. 색은 sRGB 출력에서 밝아지므로 선형으로 바꿔 넣는다
+    const lin = h => new THREE.Color(h).convertSRGBToLinear();
+    const far = new THREE.Mesh(new THREE.CircleGeometry(620, 64), new THREE.MeshBasicMaterial({ color: lin(0x0b0c1a), fog: false }));
+    far.rotation.x = -Math.PI / 2; far.position.y = -0.6; scene.add(far);
+    const ridge = (radius, w, hmin, hmax, color, seedOff) => {
+      const n = Math.round(Math.PI * 2 * radius / w);
+      const m = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: lin(color), fog: false }), n);
+      const mt = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), pos = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+      for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2;
+        const u = Math.sin(a * 3 + seedOff) * 0.5 + Math.sin(a * 7 + seedOff * 2) * 0.3 + Math.sin(a * 17 + seedOff) * 0.2;   // -1..1
+        const h = hmin + (hmax - hmin) * (u * 0.5 + 0.5) ** 1.6;
+        pos.set(Math.cos(a) * radius, h / 2 - 1, Math.sin(a) * radius); q.setFromAxisAngle(up, -a); s.set(w * 1.05, h, w);
+        mt.compose(pos, q, s); m.setMatrixAt(i, mt);
+      }
+      scene.add(m);
+    };
+    ridge(560, 18, 14, 70, 0x231d45, 1.7);   // 먼 산: 밤안개처럼 옅게
+    ridge(440, 14, 8, 44, 0x130f27, 4.1);    // 가까운 산: 짙게
+  }
+
   // ---------------- 흩날리는 벚꽃잎
   const PET = reduce ? 600 : 950;   // 꽃잎과 불꽃은 이 페이지의 본 내용이라 모션 줄이기에서도 켠다
   const petalGeo = new THREE.PlaneGeometry(0.8, 0.55);
@@ -517,6 +545,36 @@
   document.getElementById("close").addEventListener("click", closeMV);
   addEventListener("keydown", e => { if (e.key === "Escape" && !mv.hidden) closeMV(); });
 
+  // ---------------- 별똥별: 화면 위쪽 하늘을 비스듬히 가로지른다
+  const mc = document.getElementById("meteors"), mx = mc.getContext("2d");
+  let meteor = null, meteorNext = 2.5;
+  function meteors(dt) {
+    const W = innerWidth, H = innerHeight, dpr = Math.min(devicePixelRatio, 2);
+    if (mc.width !== Math.round(W * dpr)) { mc.width = Math.round(W * dpr); mc.height = Math.round(H * dpr); }
+    mx.setTransform(dpr, 0, 0, dpr, 0, 0); mx.clearRect(0, 0, W, H);
+    meteorNext -= dt;
+    if (!meteor && meteorNext <= 0) {
+      const dir = rnd() < 0.5 ? -1 : 1, ang = R(0.32, 0.6);
+      meteor = { x: R(0.15, 0.85) * W, y: R(0.03, 0.22) * H, vx: Math.cos(ang) * dir, vy: Math.sin(ang), sp: R(520, 760) * Math.min(1, W / 1000 + 0.35), len: R(110, 220), t: 0, dur: R(0.7, 1.1) };
+      meteorNext = R(3.5, 8);
+    }
+    if (!meteor) return;
+    const m = meteor; m.t += dt;
+    const k = m.t / m.dur;
+    if (k >= 1) { meteor = null; return; }
+    const hx = m.x + m.vx * m.sp * m.t, hy = m.y + m.vy * m.sp * m.t;
+    const a = Math.sin(Math.PI * k);                       // 켜졌다가 꺼진다
+    const L = m.len * (0.4 + 0.6 * Math.min(1, k * 3));
+    const tx = hx - m.vx * L, ty = hy - m.vy * L;
+    const g = mx.createLinearGradient(hx, hy, tx, ty);
+    g.addColorStop(0, `rgba(255,250,235,${0.95 * a})`); g.addColorStop(0.25, `rgba(255,214,236,${0.55 * a})`); g.addColorStop(1, "rgba(200,190,255,0)");
+    mx.strokeStyle = g; mx.lineWidth = 2.2; mx.lineCap = "round";
+    mx.beginPath(); mx.moveTo(hx, hy); mx.lineTo(tx, ty); mx.stroke();
+    const hg = mx.createRadialGradient(hx, hy, 0, hx, hy, 9);
+    hg.addColorStop(0, `rgba(255,255,245,${a})`); hg.addColorStop(1, "rgba(255,230,245,0)");
+    mx.fillStyle = hg; mx.beginPath(); mx.arc(hx, hy, 9, 0, Math.PI * 2); mx.fill();
+  }
+
   // ---------------- 루프
   const clock = new THREE.Clock();
   function tick() {
@@ -562,6 +620,7 @@
     bgPetals.instanceMatrix.needsUpdate = true;
     water.material.emissiveIntensity = 0.9 + Math.sin(t * 0.8) * 0.1;
     fireworks(dt);
+    meteors(dt);
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
   }
