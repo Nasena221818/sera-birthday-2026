@@ -149,7 +149,7 @@
   for (let x = -70; x <= 70; x++) for (let z = -70; z <= 70; z++) {
     const d = x * x + z * z;
     if (d > 70 * 70) continue;
-    if (inPond(x, z)) { put(x, -2, z, 0x1a2140); continue; }
+    if (inPond(x, z)) { put(x, -1, z, 0x1a2140); continue; }   // 바닥 윗면이 잔디 밑면(0)과 맞물려 틈이 없다
     if (onPath(x, z)) { put(x, 0, z, rnd() < 0.5 ? 0x6d6a78 : 0x5d5a68); continue; }
     const n = Math.sin(x * 0.3) * Math.cos(z * 0.25);
     put(x, 0, z, n > 0.3 ? 0x17282a : n > -0.2 ? 0x132326 : 0x101d21);
@@ -277,8 +277,12 @@
   lanterns.forEach(([x, z], i) => { if (i < 4) { const L = new THREE.PointLight(0xffb35c, 1.1, 26, 2); L.position.set(x, 6, z); scene.add(L); } });
 
   // 연못 물: 달빛 반사
-  const water = new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshPhongMaterial({ color: 0x18204a, emissive: 0x0b0f2a, shininess: 90, specular: 0x8899ff, transparent: true, opacity: 0.88 }));
-  water.scale.set(POND.rx, POND.rz, 1); water.rotation.x = -Math.PI / 2; water.position.set(POND.x, -0.6, POND.z); water.receiveShadow = true;
+  // 타원 원판 대신 연못 칸마다 한 장씩 깔아 계단 가장자리와 딱 맞춘다. 낮은 달빛 그림자가 물에 줄무늬로 깨져서 그림자는 받지 않는다
+  const pondCells = [];
+  for (let x = POND.x - POND.rx; x <= POND.x + POND.rx; x++) for (let z = POND.z - POND.rz; z <= POND.z + POND.rz; z++) if (inPond(x, z)) pondCells.push([x, z]);
+  const waterGeo = new THREE.PlaneGeometry(1, 1); waterGeo.rotateX(-Math.PI / 2);
+  const water = new THREE.InstancedMesh(waterGeo, new THREE.MeshPhongMaterial({ color: 0x18204a, emissive: 0x0b0f2a, shininess: 90, specular: 0x8899ff, transparent: true, opacity: 0.88 }), pondCells.length);
+  { const m = new THREE.Matrix4(); pondCells.forEach(([x, z], i) => { m.makeTranslation(x, 0.55, z); water.setMatrixAt(i, m); }); }
   scene.add(water);
 
   // ---------------- 케이크 (돌단 위)
@@ -498,7 +502,10 @@
   let yaw = 0.42, pitch = 0.17, dist = 104, auto = !reduce;
   const target = new THREE.Vector3(0, 13, 0);
   function placeCamera() { camera.position.set(Math.sin(yaw) * Math.cos(pitch) * dist, target.y + Math.sin(pitch) * dist, Math.cos(yaw) * Math.cos(pitch) * dist); camera.lookAt(target); }
-  function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; dist = w / h < 0.8 ? 160 : 104; camera.updateProjectionMatrix(); }
+  // 폰은 주소창이 들어갔다 나올 때마다 resize 가 온다. 세로/가로가 바뀔 때만 거리를 다시 잡아야 핀치로 맞춘 확대가 안 풀린다
+  let portrait = null;
+  const DMIN = 40, DMAX = 230;
+  function resize() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; const p = w / h < 0.8; if (p !== portrait) { portrait = p; dist = p ? 160 : 104; } camera.updateProjectionMatrix(); }
   addEventListener("resize", resize); resize();
   placeCamera(); placeMoon();   // 첫 구도 기준으로 한 번만
 
@@ -509,17 +516,33 @@
   function hitsCake(e) { const r = canvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); return ray.intersectObjects([hitbox, cake, ...candles, ...flames.flatMap(f => f.children)]).length > 0; }
   let down = null;
   const TAP = touch ? 14 : 6;   // 손가락은 탭할 때도 조금 움직인다
-  canvas.addEventListener("pointerdown", e => { down = { x: e.clientX, y: e.clientY, yaw, pitch, moved: 0 }; try { canvas.setPointerCapture(e.pointerId); } catch (_) {} });
-  canvas.addEventListener("pointercancel", () => { down = null; });
+  // 두 손가락 핀치 = 확대·축소. 손가락이 둘이 되는 순간 회전 드래그는 끊고, 그 손길은 탭으로 치지 않는다
+  const pts = new Map(); let pinch = null;
+  const spread = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; };
+  canvas.addEventListener("pointerdown", e => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    if (pts.size === 2) { pinch = { s: spread(), d: dist }; down = null; lastDrag = true; auto = false; return; }
+    if (pts.size === 1) down = { x: e.clientX, y: e.clientY, yaw, pitch, moved: 0 };
+  });
+  const lift = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; };
+  canvas.addEventListener("pointercancel", e => { lift(e); down = null; });
   let lastDrag = false;
   canvas.addEventListener("click", e => { if (!lastDrag && hitsCake(e)) blowOut(); });   // 일부 모바일 브라우저는 pointerup 대신 click 만 믿을 만하다
   canvas.addEventListener("pointermove", e => {
+    if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pts.size >= 2) { dist = Math.min(DMAX, Math.max(DMIN, pinch.d * pinch.s / spread())); return; }
     if (down) { const dx = e.clientX - down.x, dy = e.clientY - down.y; down.moved = Math.max(down.moved, Math.hypot(dx, dy));
       if (down.moved > TAP) { auto = false; yaw = down.yaw - dx * 0.005; pitch = Math.min(0.9, Math.max(0.04, down.pitch + dy * 0.003)); } }
     else if (e.pointerType === "mouse") canvas.classList.toggle("hot", hitsCake(e));
   });
-  canvas.addEventListener("pointerup", e => { lastDrag = !!down && down.moved > TAP; if (down && !lastDrag && hitsCake(e)) blowOut(); down = null; });
-  canvas.addEventListener("wheel", e => { e.preventDefault(); dist = Math.min(190, Math.max(50, dist * (1 + e.deltaY * 0.001))); }, { passive: false });
+  canvas.addEventListener("pointerup", e => {
+    const wasPinch = pts.size >= 2 || !!pinch; lift(e);
+    if (wasPinch) { lastDrag = true; down = null; return; }
+    if (!down) return;   // 핀치하다 남은 손가락 하나를 뗄 때
+    lastDrag = down.moved > TAP; if (!lastDrag && hitsCake(e)) blowOut(); down = null;
+  });
+  canvas.addEventListener("wheel", e => { e.preventDefault(); dist = Math.min(DMAX, Math.max(DMIN, dist * (1 + e.deltaY * 0.001))); }, { passive: false });
   canvas.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); blowOut(); } });
   document.getElementById("direct").addEventListener("click", () => openMV());
 
